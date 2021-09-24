@@ -24,6 +24,9 @@ import org.axonframework.config.DefaultConfigurer;
 import org.axonframework.config.EventHandlingConfiguration;
 import org.axonframework.config.ProcessingGroup;
 import org.axonframework.config.SagaConfiguration;
+import org.axonframework.eventhandling.EventListener;
+import org.axonframework.eventhandling.EventMessage;
+import org.axonframework.eventhandling.ListenerInvocationErrorHandler;
 import org.axonframework.eventsourcing.eventstore.EventStore;
 import org.axonframework.messaging.interceptors.BeanValidationInterceptor;
 import org.axonframework.samples.trader.company.command.Company;
@@ -89,11 +92,31 @@ public class CQRSInfrastructureConfig {
         EventHandlingConfiguration commandPublisherConfiguration =
                 new EventHandlingConfiguration().registerSubscribingEventProcessor("commandPublishingEventHandlers");
 
+        ListenerInvocationErrorHandler alwaysRetryingEventHandler = (e, eventMessage, eventListener) -> {
+            System.out.println("Processing error: retrying");
+            eventListener.handle(eventMessage);
+        };
+
+        EventHandlingConfiguration failingPublisherConfiguration =
+                new EventHandlingConfiguration().registerSubscribingEventProcessor("failingEventHandlers")
+                        .configureListenerInvocationErrorHandler(conf -> alwaysRetryingEventHandler);
+
+        EventHandlingConfiguration sagaConfiguration =
+                new EventHandlingConfiguration().registerSubscribingEventProcessor("sagaEventHandlers")
+                        .configureListenerInvocationErrorHandler(conf -> alwaysRetryingEventHandler);
+
         Map<String, Object> eventHandlingComponents = applicationContext.getBeansWithAnnotation(ProcessingGroup.class);
 
         eventHandlingComponents.forEach((key, value) -> {
             if (key.contains("Listener")) {
+                System.out.println("Registering listener " + key);
                 commandPublisherConfiguration.registerEventHandler(conf -> value);
+            } else if (key.contains("Publisher")) {
+                System.out.println("Registering publisher " + key);
+                failingPublisherConfiguration.registerEventHandler(conf -> value);
+            } else if (key.contains("Saga")) {
+                System.out.println("Registering saga " + key);
+                sagaConfiguration.registerEventHandler(conf -> value);
             } else {
                 queryModelConfiguration.registerEventHandler(conf -> value);
             }
@@ -101,18 +124,20 @@ public class CQRSInfrastructureConfig {
 
         org.axonframework.config.Configuration configuration =
                 DefaultConfigurer.defaultConfiguration()
-                                 .configureCommandBus(conf -> commandBus)
-                                 .configureEventStore(conf -> eventStore)
-                                 .configureAggregate(User.class)
-                                 .configureAggregate(Company.class)
-                                 .configureAggregate(Portfolio.class)
-                                 .configureAggregate(Transaction.class)
-                                 .configureAggregate(OrderBook.class)
-                                 .registerModule(queryModelConfiguration)
-                                 .registerModule(commandPublisherConfiguration)
-                                 .registerModule(SagaConfiguration.subscribingSagaManager(SellTradeManagerSaga.class))
-                                 .registerModule(SagaConfiguration.subscribingSagaManager(BuyTradeManagerSaga.class))
-                                 .buildConfiguration();
+                        .configureCommandBus(conf -> commandBus)
+                        .configureEventStore(conf -> eventStore)
+                        .configureAggregate(User.class)
+                        .configureAggregate(Company.class)
+                        .configureAggregate(Portfolio.class)
+                        .configureAggregate(Transaction.class)
+                        .configureAggregate(OrderBook.class)
+                        .registerModule(queryModelConfiguration)
+                        .registerModule(commandPublisherConfiguration)
+                        .registerModule(failingPublisherConfiguration)
+                        .registerModule(sagaConfiguration)
+                        .registerModule(SagaConfiguration.subscribingSagaManager(SellTradeManagerSaga.class))
+                        .registerModule(SagaConfiguration.subscribingSagaManager(BuyTradeManagerSaga.class))
+                        .buildConfiguration();
         configuration.start();
         return configuration;
     }

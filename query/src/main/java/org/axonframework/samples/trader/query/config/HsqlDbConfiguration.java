@@ -43,7 +43,7 @@ public class HsqlDbConfiguration {
 
     private Properties jpaProps() {
         final Properties p = new Properties();
-        p.setProperty("hibernate.show_sql", "true");
+        p.setProperty("hibernate.show_sql", "false");
         p.setProperty("hibernate.generate_statistics", "false");
         p.setProperty("hibernate.dialect", "org.hibernate.dialect.HSQLDialect");
         return p;
